@@ -1,17 +1,36 @@
 const express = require('express');
+
 const Schedule = require('../models/Schedule');
+
 const authMiddleware = require('../middleware/authMiddleware');
+
+const TimeSlot = require('../models/TimeSlot');
+
 const router = express.Router();
 
 // Создать расписание
 router.post('/', authMiddleware, async (req, res) => {
+
     try {
-        const schedule = new Schedule({ name: req.body.name });
+
+        const schedule = new Schedule({
+
+            name: req.body.name,
+
+            items: []
+
+        });
+
         await schedule.save();
+
         res.status(201).json(schedule);
+
     } catch (err) {
+
         res.status(400).json({ error: err.message });
+
     }
+
 });
 
 // Получить все расписания
@@ -93,47 +112,77 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
 // Оптимизировать расписание
 router.post('/optimize/:id', authMiddleware, async (req, res) => {
+
     try {
+
         const schedule = await Schedule.findById(req.params.id).populate('items.group items.teacher items.room');
+
         if (!schedule) {
+
             return res.status(404).json({ error: 'Schedule not found' });
+
         }
 
-        schedule.items = optimizeSchedule(schedule.items);
+
+
+        const timeSlots = await TimeSlot.findOne({ user: req.user.id }) || { slots: ['08:30-10:05', '10:15-11:50', '12:10-13:45', '14:00-15:35'] };
+
+        schedule.items = optimizeSchedule(schedule.items, timeSlots.slots);
+
         await schedule.save();
 
         res.json(schedule);
+
     } catch (err) {
+
         res.status(500).json({ error: err.message });
+
     }
+
 });
 
-const optimizeSchedule = (items) => {
-    // Пример простого жадного алгоритма распределения занятий по дням недели
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const timeSlots = ['08:30-10:05', '10:15-11:50', '12:10-13:45', '14:00-15:35'];
+
+
+const optimizeSchedule = (items, timeSlots) => {
+
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     let scheduleGrid = Array.from({ length: days.length }, () => Array(timeSlots.length).fill(null));
 
     items.forEach(item => {
+
         for (let dayIndex = 0; dayIndex < days.length; dayIndex++) {
+
             for (let slotIndex = 0; slotIndex < timeSlots.length; slotIndex++) {
+
                 if (!scheduleGrid[dayIndex][slotIndex]) {
+
                     const [startHour, startMinute] = timeSlots[slotIndex].split('-')[0].split(':').map(Number);
+
                     const [endHour, endMinute] = timeSlots[slotIndex].split('-')[1].split(':').map(Number);
+
                     item.startTime = new Date();
+
                     item.startTime.setHours(startHour, startMinute);
+
                     item.endTime = new Date();
+
                     item.endTime.setHours(endHour, endMinute);
 
                     scheduleGrid[dayIndex][slotIndex] = item;
+
                     return;
+
                 }
+
             }
+
         }
+
     });
 
-    return scheduleGrid.flat().filter(item => item !== undefined);
+    return scheduleGrid.flat().filter(item => item !== null);
+
 };
 
 module.exports = router;
